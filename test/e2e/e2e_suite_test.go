@@ -1347,6 +1347,10 @@ var _ = Describe("OpenClawInstance Controller", func() {
 			browser, ok := parsed["browser"].(map[string]interface{})
 			Expect(ok).To(BeTrue(), "config should have browser key")
 
+			attachOnly, ok := browser["attachOnly"].(bool)
+			Expect(ok).To(BeTrue(), "browser should have attachOnly key")
+			Expect(attachOnly).To(BeTrue(), "browser.attachOnly should be true for sidecar mode")
+
 			profiles, ok := browser["profiles"].(map[string]interface{})
 			Expect(ok).To(BeTrue(), "browser should have profiles key")
 
@@ -1357,8 +1361,6 @@ var _ = Describe("OpenClawInstance Controller", func() {
 				Expect(ok).To(BeTrue(), "profiles should have %s key", profileName)
 				Expect(profile["cdpUrl"]).To(Equal(expectedCDP),
 					"browser.profiles.%s.cdpUrl should use env var reference for pod IP", profileName)
-				Expect(profile["attachOnly"]).To(BeTrue(),
-					"browser.profiles.%s.attachOnly should be true for sidecar mode", profileName)
 			}
 
 			// Verify Service has chromium port

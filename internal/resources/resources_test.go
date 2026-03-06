@@ -6700,6 +6700,10 @@ func TestBuildConfigMap_ChromiumBrowserConfig(t *testing.T) {
 		t.Errorf("browser.defaultProfile = %v, want %q", browser["defaultProfile"], "default")
 	}
 
+	if browser["attachOnly"] != true {
+		t.Errorf("browser.attachOnly = %v, want true", browser["attachOnly"])
+	}
+
 	profiles, ok := browser["profiles"].(map[string]interface{})
 	if !ok {
 		t.Fatal("expected browser.profiles key")
@@ -6719,9 +6723,6 @@ func TestBuildConfigMap_ChromiumBrowserConfig(t *testing.T) {
 		if p["color"] != "#4285F4" {
 			t.Errorf("browser.profiles.%s.color = %v, want %q", name, p["color"], "#4285F4")
 		}
-		if p["attachOnly"] != true {
-			t.Errorf("browser.profiles.%s.attachOnly = %v, want true", name, p["attachOnly"])
-		}
 	}
 }
 
@@ -6730,7 +6731,7 @@ func TestBuildConfigMap_ChromiumUserOverrideAttachOnly(t *testing.T) {
 	instance.Spec.Chromium.Enabled = true
 	instance.Spec.Config.Raw = &openclawv1alpha1.RawConfig{
 		RawExtension: runtime.RawExtension{
-			Raw: []byte(`{"browser":{"profiles":{"default":{"attachOnly":false}}}}`),
+			Raw: []byte(`{"browser":{"attachOnly":false}}`),
 		},
 	}
 
@@ -6743,11 +6744,9 @@ func TestBuildConfigMap_ChromiumUserOverrideAttachOnly(t *testing.T) {
 	}
 
 	browser := parsed["browser"].(map[string]interface{})
-	profiles := browser["profiles"].(map[string]interface{})
-	defaultProfile := profiles["default"].(map[string]interface{})
-
-	if defaultProfile["attachOnly"] != false {
-		t.Errorf("user-set attachOnly should be preserved, got %v", defaultProfile["attachOnly"])
+	attachOnly := browser["attachOnly"].(bool)
+	if attachOnly != false {
+		t.Errorf("user-set attachOnly should be preserved, got %v", attachOnly)
 	}
 }
 

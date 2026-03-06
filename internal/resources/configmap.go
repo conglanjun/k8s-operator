@@ -297,6 +297,10 @@ func enrichConfigWithBrowser(configJSON []byte) ([]byte, error) {
 		browser["defaultProfile"] = "default"
 	}
 
+	if _, hasAttachOnly := browser["attachOnly"]; !hasAttachOnly {
+		browser["attachOnly"] = true
+	}
+
 	profiles, _ := browser["profiles"].(map[string]interface{})
 	if profiles == nil {
 		profiles = make(map[string]interface{})
@@ -304,8 +308,6 @@ func enrichConfigWithBrowser(configJSON []byte) ([]byte, error) {
 
 	// Use ${OPENCLAW_CHROMIUM_CDP} env var (resolved at runtime by OpenClaw)
 	// which points to the Chromium sidecar via localhost (127.0.0.1).
-	// attachOnly=true tells OpenClaw to attach to the existing sidecar
-	// instead of trying to launch/manage the browser process locally.
 	cdpURL := "${OPENCLAW_CHROMIUM_CDP}"
 
 	// Configure both "default" and "chrome" profiles to point at the sidecar.
@@ -327,12 +329,6 @@ func enrichConfigWithBrowser(configJSON []byte) ([]byte, error) {
 		// color is required by OpenClaw's config validation
 		if _, hasColor := profile["color"]; !hasColor {
 			profile["color"] = "#4285F4"
-		}
-
-		// attachOnly tells OpenClaw to attach to the existing sidecar
-		// instead of trying to launch/manage the browser process locally.
-		if _, hasAttachOnly := profile["attachOnly"]; !hasAttachOnly {
-			profile["attachOnly"] = true
 		}
 
 		profiles[profileName] = profile
