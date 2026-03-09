@@ -159,6 +159,9 @@ func buildContainerSecurityContext(instance *openclawv1alpha1.OpenClawInstance) 
 		},
 	}
 
+	psc := buildPodSecurityContext(instance)
+	sc = mergeSecurityContext(sc, psc)
+
 	// Apply user overrides
 	spec := instance.Spec.Security.ContainerSecurityContext
 	if spec != nil {
@@ -171,6 +174,27 @@ func buildContainerSecurityContext(instance *openclawv1alpha1.OpenClawInstance) 
 		if spec.Capabilities != nil {
 			sc.Capabilities = spec.Capabilities
 		}
+	}
+
+	return sc
+}
+
+func mergeSecurityContext(sc *corev1.SecurityContext, psc *corev1.PodSecurityContext) *corev1.SecurityContext {
+	if psc == nil {
+		return sc
+	}
+	if sc == nil {
+		sc = &corev1.SecurityContext{}
+	}
+
+	if psc.RunAsNonRoot != nil {
+		sc.RunAsNonRoot = psc.RunAsNonRoot
+	}
+	if psc.RunAsUser != nil {
+		sc.RunAsUser = psc.RunAsUser
+	}
+	if psc.RunAsGroup != nil {
+		sc.RunAsGroup = psc.RunAsGroup
 	}
 
 	return sc
@@ -490,6 +514,8 @@ func buildInitContainers(instance *openclawv1alpha1.OpenClawInstance, skillPacks
 			initPullPolicy = getPullPolicy(instance)
 		}
 
+		psc := buildPodSecurityContext(instance)
+
 		initContainers = append(initContainers, corev1.Container{
 			Name:                     "init-config",
 			Image:                    initImage,
@@ -498,7 +524,7 @@ func buildInitContainers(instance *openclawv1alpha1.OpenClawInstance, skillPacks
 			Env:                      initEnv,
 			TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 			TerminationMessagePolicy: corev1.TerminationMessageReadFile,
-			SecurityContext: &corev1.SecurityContext{
+			SecurityContext: mergeSecurityContext(&corev1.SecurityContext{
 				AllowPrivilegeEscalation: Ptr(false),
 				ReadOnlyRootFilesystem:   Ptr(readOnlyRoot),
 				RunAsNonRoot:             Ptr(true),
@@ -508,7 +534,7 @@ func buildInitContainers(instance *openclawv1alpha1.OpenClawInstance, skillPacks
 				SeccompProfile: &corev1.SeccompProfile{
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},
-			},
+			}, psc),
 			VolumeMounts: mounts,
 		})
 	}
@@ -1014,6 +1040,22 @@ func buildTailscaleContainer(instance *openclawv1alpha1.OpenClawInstance) corev1
 		})
 	}
 
+	psc := buildPodSecurityContext(instance)
+
+	sc := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: Ptr(false),
+		ReadOnlyRootFilesystem:   Ptr(true),
+		RunAsNonRoot:             Ptr(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+
+	sc = mergeSecurityContext(sc, psc)
+
 	return corev1.Container{
 		Name:            "tailscale",
 		Image:           image,
@@ -1036,18 +1078,8 @@ func buildTailscaleContainer(instance *openclawv1alpha1.OpenClawInstance) corev1
 				MountPath: "/tmp",
 			},
 		},
-		Resources: buildTailscaleResourceRequirements(instance),
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: Ptr(false),
-			ReadOnlyRootFilesystem:   Ptr(true),
-			RunAsNonRoot:             Ptr(true),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		},
+		Resources:                buildTailscaleResourceRequirements(instance),
+		SecurityContext:          sc,
 		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
 	}
@@ -1123,8 +1155,22 @@ func buildTailscaleBinInitContainer(instance *openclawv1alpha1.OpenClawInstance)
 
 // buildGatewayProxyContainer creates the nginx reverse proxy sidecar that
 // exposes the loopback-bound gateway and canvas ports for external access.
-func buildGatewayProxyContainer(_ *openclawv1alpha1.OpenClawInstance) corev1.Container {
-	return corev1.Container{
+func buildGatewayProxyContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.Container {
+	psc := buildPodSecurityContext(instance)
+	sc := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: Ptr(false),
+		ReadOnlyRootFilesystem:   Ptr(true),
+		RunAsNonRoot:             Ptr(true),
+		RunAsUser:                Ptr(int64(101)), // nginx user in alpine
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+	sc = mergeSecurityContext(sc, psc)
+	container := corev1.Container{
 		Name:            "gateway-proxy",
 		Image:           DefaultGatewayProxyImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
@@ -1162,21 +1208,11 @@ func buildGatewayProxyContainer(_ *openclawv1alpha1.OpenClawInstance) corev1.Con
 				corev1.ResourceMemory: resource.MustParse("64Mi"),
 			},
 		},
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: Ptr(false),
-			ReadOnlyRootFilesystem:   Ptr(true),
-			RunAsNonRoot:             Ptr(true),
-			RunAsUser:                Ptr(int64(101)), // nginx user in alpine
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		},
+		SecurityContext:          sc,
 		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
 	}
+	return container
 }
 
 // buildChromiumContainer creates the Chromium sidecar container
@@ -1254,24 +1290,29 @@ func buildChromiumContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.
 	// Append user-supplied extra env vars
 	chromiumEnv = append(chromiumEnv, instance.Spec.Chromium.ExtraEnv...)
 
+	psc := buildPodSecurityContext(instance)
+
+	sc := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: Ptr(false),
+		ReadOnlyRootFilesystem:   Ptr(true),
+		RunAsNonRoot:             Ptr(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+
+	sc = mergeSecurityContext(sc, psc)
+
 	return corev1.Container{
 		Name:                     "chromium",
 		Image:                    image,
 		ImagePullPolicy:          corev1.PullIfNotPresent,
 		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: Ptr(false),
-			ReadOnlyRootFilesystem:   Ptr(false), // Chromium needs writable dirs for profiles, cache, crash dumps
-			RunAsNonRoot:             Ptr(true),
-			RunAsUser:                Ptr(int64(999)), // browserless built-in user (blessuser)
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		},
+		SecurityContext:          sc,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "cdp",
@@ -1319,24 +1360,29 @@ func buildOllamaContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.Co
 		image = repo + "@" + instance.Spec.Ollama.Image.Digest
 	}
 
+	psc := buildPodSecurityContext(instance)
+
+	sc := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: Ptr(false),
+		ReadOnlyRootFilesystem:   Ptr(true),
+		RunAsNonRoot:             Ptr(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+
+	sc = mergeSecurityContext(sc, psc)
+
 	container := corev1.Container{
 		Name:                     "ollama",
 		Image:                    image,
 		ImagePullPolicy:          corev1.PullIfNotPresent,
 		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: Ptr(false),
-			ReadOnlyRootFilesystem:   Ptr(false), // Ollama needs writable dirs
-			RunAsNonRoot:             Ptr(false), // Ollama requires root
-			RunAsUser:                Ptr(int64(0)),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		},
+		SecurityContext:          sc,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "ollama",
@@ -1429,6 +1475,22 @@ func buildWebTerminalContainer(instance *openclawv1alpha1.OpenClawInstance) core
 		)
 	}
 
+	psc := buildPodSecurityContext(instance)
+
+	sc := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: Ptr(false),
+		ReadOnlyRootFilesystem:   Ptr(true),
+		RunAsNonRoot:             Ptr(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+
+	sc = mergeSecurityContext(sc, psc)
+
 	return corev1.Container{
 		Name:                     "web-terminal",
 		Image:                    image,
@@ -1436,18 +1498,7 @@ func buildWebTerminalContainer(instance *openclawv1alpha1.OpenClawInstance) core
 		ImagePullPolicy:          corev1.PullIfNotPresent,
 		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: Ptr(false),
-			ReadOnlyRootFilesystem:   Ptr(false), // ttyd needs writable rootfs
-			RunAsNonRoot:             Ptr(true),
-			RunAsUser:                Ptr(int64(1000)), // same as main container
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		},
+		SecurityContext:          sc,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "web-terminal",
