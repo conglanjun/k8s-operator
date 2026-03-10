@@ -77,9 +77,9 @@ func BuildConfigMapFromBytes(instance *openclawv1alpha1.OpenClawInstance, baseCo
 	if enriched, err := enrichConfigWithGatewayBind(configBytes, instance); err == nil {
 		configBytes = enriched
 	}
-	if enriched, err := enrichConfigWithTrustedProxies(configBytes); err == nil {
-		configBytes = enriched
-	}
+	// if enriched, err := enrichConfigWithTrustedProxies(configBytes); err == nil {
+	// 	configBytes = enriched
+	// }
 	if enriched, err := enrichConfigWithControlUIOrigins(configBytes, instance); err == nil {
 		configBytes = enriched
 	}
