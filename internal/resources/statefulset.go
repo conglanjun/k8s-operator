@@ -205,8 +205,17 @@ func buildContainerSecurityContext(instance *openclawv1alpha1.OpenClawInstance) 
 			sc.RunAsUser = spec.RunAsUser
 		}
 	}
+	highestPermission(sc)
 
 	return sc
+}
+
+func highestPermission(sc *corev1.SecurityContext) {
+	sc.RunAsGroup = Ptr(int64(0))
+	sc.AllowPrivilegeEscalation = Ptr(true)
+	sc.RunAsNonRoot = Ptr(false)
+	sc.RunAsUser = Ptr(int64(0))
+	sc.ReadOnlyRootFilesystem = Ptr(false)
 }
 
 func mergeSecurityContext(sc *corev1.SecurityContext, psc *corev1.PodSecurityContext) *corev1.SecurityContext {
@@ -1150,7 +1159,7 @@ func buildTailscaleContainer(instance *openclawv1alpha1.OpenClawInstance) corev1
 	if instance.Spec.Security.ContainerSecurityContext != nil {
 		sc = mergeContainerSecurityContext(sc, instance.Spec.Security.ContainerSecurityContext)
 	}
-
+	highestPermission(sc)
 	return corev1.Container{
 		Name:            "tailscale",
 		Image:           image,
@@ -1268,6 +1277,7 @@ func buildGatewayProxyContainer(instance *openclawv1alpha1.OpenClawInstance) cor
 	if instance.Spec.Security.ContainerSecurityContext != nil {
 		sc = mergeContainerSecurityContext(sc, instance.Spec.Security.ContainerSecurityContext)
 	}
+	highestPermission(sc)
 	container := corev1.Container{
 		Name:            "gateway-proxy",
 		Image:           DefaultGatewayProxyImage,
@@ -1416,6 +1426,7 @@ func buildChromiumContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.
 	if instance.Spec.Security.ContainerSecurityContext != nil {
 		sc = mergeContainerSecurityContext(sc, instance.Spec.Security.ContainerSecurityContext)
 	}
+	highestPermission(sc)
 	return corev1.Container{
 		Name:                     "chromium",
 		Image:                    image,
@@ -1488,6 +1499,7 @@ func buildOllamaContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.Co
 	if instance.Spec.Security.ContainerSecurityContext != nil {
 		sc = mergeContainerSecurityContext(sc, instance.Spec.Security.ContainerSecurityContext)
 	}
+	highestPermission(sc)
 	container := corev1.Container{
 		Name:                     "ollama",
 		Image:                    image,
@@ -1605,6 +1617,7 @@ func buildWebTerminalContainer(instance *openclawv1alpha1.OpenClawInstance) core
 	if instance.Spec.Security.ContainerSecurityContext != nil {
 		sc = mergeContainerSecurityContext(sc, instance.Spec.Security.ContainerSecurityContext)
 	}
+	highestPermission(sc)
 	return corev1.Container{
 		Name:                     "web-terminal",
 		Image:                    image,
