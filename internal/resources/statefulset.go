@@ -17,6 +17,7 @@ limitations under the License.
 package resources
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -29,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	openclawv1alpha1 "github.com/openclawrocks/k8s-operator/api/v1alpha1"
 )
@@ -112,14 +114,17 @@ func buildPodSecurityContext(instance *openclawv1alpha1.OpenClawInstance) *corev
 		},
 	}
 
+	logger := log.FromContext(context.Background())
 	// Apply user overrides or defaults
 	spec := instance.Spec.Security.PodSecurityContext
 	if spec != nil {
+		logger.Info("psc.RunAsUser", "value", psc.RunAsUser)
 		if spec.RunAsUser != nil {
 			psc.RunAsUser = spec.RunAsUser
 		} else {
 			psc.RunAsUser = Ptr(int64(1000))
 		}
+		logger.Info("psc.RunAsGroup", "value", psc.RunAsGroup)
 		if spec.RunAsGroup != nil {
 			psc.RunAsGroup = spec.RunAsGroup
 		} else {
@@ -128,6 +133,7 @@ func buildPodSecurityContext(instance *openclawv1alpha1.OpenClawInstance) *corev
 			} else {
 				psc.RunAsGroup = Ptr(int64(1000))
 			}
+			logger.Info("else psc.RunAsGroup", "value", psc.RunAsGroup)
 		}
 		if spec.FSGroup != nil {
 			psc.FSGroup = spec.FSGroup
@@ -145,6 +151,9 @@ func buildPodSecurityContext(instance *openclawv1alpha1.OpenClawInstance) *corev
 		psc.RunAsGroup = Ptr(int64(1000))
 		psc.FSGroup = Ptr(int64(1000))
 	}
+
+	logger.Info("final psc.RunAsUser", "value", psc.RunAsUser)
+	logger.Info("final psc.RunAsGroup", "value", psc.RunAsGroup)
 
 	return psc
 }
@@ -208,12 +217,16 @@ func mergeSecurityContext(sc *corev1.SecurityContext, psc *corev1.PodSecurityCon
 		sc = &corev1.SecurityContext{}
 	}
 
+	logger := log.FromContext(context.Background())
+	logger.Info("psc.RunAsNonRoot", "value", psc.RunAsNonRoot)
 	if psc.RunAsNonRoot != nil {
 		sc.RunAsNonRoot = psc.RunAsNonRoot
 	}
+	logger.Info("sc.RunAsUser", "value", sc.RunAsUser)
 	if psc.RunAsUser != nil {
 		sc.RunAsUser = psc.RunAsUser
 	}
+	logger.Info("sc.RunAsGroup", "value", sc.RunAsGroup)
 	if psc.RunAsGroup != nil {
 		sc.RunAsGroup = psc.RunAsGroup
 	} else {
@@ -222,6 +235,7 @@ func mergeSecurityContext(sc *corev1.SecurityContext, psc *corev1.PodSecurityCon
 		} else {
 			sc.RunAsGroup = Ptr(int64(1000))
 		}
+		logger.Info("else sc.RunAsGroup", "value", sc.RunAsGroup)
 	}
 
 	return sc
