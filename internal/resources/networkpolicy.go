@@ -93,6 +93,13 @@ func networkPolicyIngressPorts(instance *openclawv1alpha1.OpenClawInstance) []ne
 		})
 	}
 
+	if instance.Spec.Chromium.Enabled {
+		ports = append(ports, networkingv1.NetworkPolicyPort{
+			Protocol: Ptr(corev1.ProtocolTCP),
+			Port:     Ptr(intstr.FromInt32(int32(ChromiumPort))),
+		})
+	}
+
 	return ports
 }
 
