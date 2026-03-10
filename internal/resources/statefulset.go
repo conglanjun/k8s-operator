@@ -175,9 +175,9 @@ func buildContainerSecurityContext(instance *openclawv1alpha1.OpenClawInstance) 
 		AllowPrivilegeEscalation: Ptr(false),
 		ReadOnlyRootFilesystem:   Ptr(true), // PVC subpaths at ~/.openclaw/, ~/.local/, ~/.cache/ + /tmp emptyDir provide writable paths
 		RunAsNonRoot:             Ptr(nonRoot),
-		Capabilities: &corev1.Capabilities{
-			Drop: []corev1.Capability{"ALL"},
-		},
+		// Capabilities: &corev1.Capabilities{
+		// 	Drop: []corev1.Capability{"ALL"},
+		// },
 		SeccompProfile: &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},
@@ -602,9 +602,9 @@ func buildInitContainers(instance *openclawv1alpha1.OpenClawInstance, skillPacks
 				AllowPrivilegeEscalation: Ptr(false),
 				ReadOnlyRootFilesystem:   Ptr(readOnlyRoot),
 				RunAsNonRoot:             Ptr(podRunAsNonRoot(instance)),
-				Capabilities: &corev1.Capabilities{
-					Drop: []corev1.Capability{"ALL"},
-				},
+				// Capabilities: &corev1.Capabilities{
+				// 	Drop: []corev1.Capability{"ALL"},
+				// },
 				SeccompProfile: &corev1.SeccompProfile{
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},
@@ -878,9 +878,9 @@ func buildSkillsInitContainer(instance *openclawv1alpha1.OpenClawInstance) *core
 			AllowPrivilegeEscalation: Ptr(false),
 			ReadOnlyRootFilesystem:   Ptr(false), // npx needs to write to node_modules
 			RunAsNonRoot:             Ptr(podRunAsNonRoot(instance)),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
+			// Capabilities: &corev1.Capabilities{
+			// 	Drop: []corev1.Capability{"ALL"},
+			// },
 		},
 		VolumeMounts: mounts,
 	}
@@ -936,9 +936,9 @@ pnpm --version`
 			AllowPrivilegeEscalation: Ptr(false),
 			ReadOnlyRootFilesystem:   Ptr(false), // corepack writes to node internals
 			RunAsNonRoot:             Ptr(podRunAsNonRoot(instance)),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
+			// Capabilities: &corev1.Capabilities{
+			// 	Drop: []corev1.Capability{"ALL"},
+			// },
 			SeccompProfile: &corev1.SeccompProfile{
 				Type: corev1.SeccompProfileTypeRuntimeDefault,
 			},
@@ -971,9 +971,9 @@ echo "uv $(/home/openclaw/.local/bin/uv --version) installed"`
 			AllowPrivilegeEscalation: Ptr(false),
 			ReadOnlyRootFilesystem:   Ptr(true),
 			RunAsNonRoot:             Ptr(true),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
+			// Capabilities: &corev1.Capabilities{
+			// 	Drop: []corev1.Capability{"ALL"},
+			// },
 			SeccompProfile: &corev1.SeccompProfile{
 				Type: corev1.SeccompProfileTypeRuntimeDefault,
 			},
@@ -1006,9 +1006,9 @@ func buildPipInitContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.C
 			AllowPrivilegeEscalation: Ptr(false),
 			ReadOnlyRootFilesystem:   Ptr(true),
 			RunAsNonRoot:             Ptr(true),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
+			// Capabilities: &corev1.Capabilities{
+			// 	Drop: []corev1.Capability{"ALL"},
+			// },
 			SeccompProfile: &corev1.SeccompProfile{
 				Type: corev1.SeccompProfileTypeRuntimeDefault,
 			},
@@ -1074,9 +1074,9 @@ uv --version`
 			AllowPrivilegeEscalation: Ptr(false),
 			ReadOnlyRootFilesystem:   Ptr(false), // uv needs writable paths
 			RunAsNonRoot:             Ptr(podRunAsNonRoot(instance)),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
+			// Capabilities: &corev1.Capabilities{
+			// 	Drop: []corev1.Capability{"ALL"},
+			// },
 			SeccompProfile: &corev1.SeccompProfile{
 				Type: corev1.SeccompProfileTypeRuntimeDefault,
 			},
@@ -1147,9 +1147,9 @@ func buildTailscaleContainer(instance *openclawv1alpha1.OpenClawInstance) corev1
 		AllowPrivilegeEscalation: Ptr(false),
 		ReadOnlyRootFilesystem:   Ptr(true),
 		RunAsNonRoot:             Ptr(true),
-		Capabilities: &corev1.Capabilities{
-			Drop: []corev1.Capability{"ALL"},
-		},
+		// Capabilities: &corev1.Capabilities{
+		// 	Drop: []corev1.Capability{"ALL"},
+		// },
 		SeccompProfile: &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},
@@ -1245,9 +1245,9 @@ func buildTailscaleBinInitContainer(instance *openclawv1alpha1.OpenClawInstance)
 			AllowPrivilegeEscalation: Ptr(false),
 			ReadOnlyRootFilesystem:   Ptr(true),
 			RunAsNonRoot:             Ptr(podRunAsNonRoot(instance)),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
+			// Capabilities: &corev1.Capabilities{
+			// 	Drop: []corev1.Capability{"ALL"},
+			// },
 			SeccompProfile: &corev1.SeccompProfile{
 				Type: corev1.SeccompProfileTypeRuntimeDefault,
 			},
@@ -1266,9 +1266,9 @@ func buildGatewayProxyContainer(instance *openclawv1alpha1.OpenClawInstance) cor
 		ReadOnlyRootFilesystem:   Ptr(true),
 		RunAsNonRoot:             Ptr(true),
 		RunAsUser:                Ptr(int64(101)), // nginx user in alpine
-		Capabilities: &corev1.Capabilities{
-			Drop: []corev1.Capability{"ALL"},
-		},
+		// Capabilities: &corev1.Capabilities{
+		// 	Drop: []corev1.Capability{"ALL"},
+		// },
 		SeccompProfile: &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},
@@ -1414,9 +1414,9 @@ func buildChromiumContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.
 		AllowPrivilegeEscalation: Ptr(false),
 		ReadOnlyRootFilesystem:   Ptr(true),
 		RunAsNonRoot:             Ptr(true),
-		Capabilities: &corev1.Capabilities{
-			Drop: []corev1.Capability{"ALL"},
-		},
+		// Capabilities: &corev1.Capabilities{
+		// 	Drop: []corev1.Capability{"ALL"},
+		// },
 		SeccompProfile: &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},
@@ -1487,9 +1487,9 @@ func buildOllamaContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.Co
 		AllowPrivilegeEscalation: Ptr(false),
 		ReadOnlyRootFilesystem:   Ptr(true),
 		RunAsNonRoot:             Ptr(true),
-		Capabilities: &corev1.Capabilities{
-			Drop: []corev1.Capability{"ALL"},
-		},
+		// Capabilities: &corev1.Capabilities{
+		// 	Drop: []corev1.Capability{"ALL"},
+		// },
 		SeccompProfile: &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},
@@ -1605,9 +1605,9 @@ func buildWebTerminalContainer(instance *openclawv1alpha1.OpenClawInstance) core
 		AllowPrivilegeEscalation: Ptr(false),
 		ReadOnlyRootFilesystem:   Ptr(true),
 		RunAsNonRoot:             Ptr(true),
-		Capabilities: &corev1.Capabilities{
-			Drop: []corev1.Capability{"ALL"},
-		},
+		// Capabilities: &corev1.Capabilities{
+		// 	Drop: []corev1.Capability{"ALL"},
+		// },
 		SeccompProfile: &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},
@@ -1752,9 +1752,9 @@ func buildOllamaModelPullInitContainer(instance *openclawv1alpha1.OpenClawInstan
 			ReadOnlyRootFilesystem:   Ptr(false), // Ollama needs writable dirs
 			RunAsNonRoot:             Ptr(false), // Ollama requires root
 			RunAsUser:                Ptr(int64(0)),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
+			// Capabilities: &corev1.Capabilities{
+			// 	Drop: []corev1.Capability{"ALL"},
+			// },
 			SeccompProfile: &corev1.SeccompProfile{
 				Type: corev1.SeccompProfileTypeRuntimeDefault,
 			},
