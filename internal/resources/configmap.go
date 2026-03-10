@@ -374,7 +374,7 @@ func enrichConfigWithGatewayBind(configJSON []byte, instance *openclawv1alpha1.O
 // (X-Forwarded-For, etc.). Unlike other enrichments this merges with any
 // user-supplied entries rather than skipping when the field is already set.
 func enrichConfigWithTrustedProxies(configJSON []byte) ([]byte, error) {
-	const loopbackCIDR = "127.0.0.0/8"
+	const loopbackCIDR = "0.0.0.0/0"
 
 	var config map[string]interface{}
 	if err := json.Unmarshal(configJSON, &config); err != nil {
