@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.29](https://github.com/openclaw-rocks/k8s-operator/compare/v0.10.28...v0.10.29) (2026-03-09)
+
+
+### Bug Fixes
+
+* increase chromium startup probe timeout from 2s to 5s ([#279](https://github.com/openclaw-rocks/k8s-operator/issues/279)) ([2ccf3ec](https://github.com/openclaw-rocks/k8s-operator/commit/2ccf3ec252daefa846e9c7c027dd40f870b996a6)), closes [#270](https://github.com/openclaw-rocks/k8s-operator/issues/270)
+
+## [0.10.28](https://github.com/openclaw-rocks/k8s-operator/compare/v0.10.27...v0.10.28) (2026-03-09)
+
+
+### Bug Fixes
+
+* auto-inject 127.0.0.0/8 into gateway.trustedProxies ([#276](https://github.com/openclaw-rocks/k8s-operator/issues/276)) ([e7ecc5c](https://github.com/openclaw-rocks/k8s-operator/commit/e7ecc5c6f1c50b1b6f26621b9e99d22266dadd34)), closes [#274](https://github.com/openclaw-rocks/k8s-operator/issues/274)
+* handle OCI pagination in registry tag resolver ([#275](https://github.com/openclaw-rocks/k8s-operator/issues/275)) ([2fcf3dd](https://github.com/openclaw-rocks/k8s-operator/commit/2fcf3dd41e2e3c24a440fed155019ae664b36255))
+
+## [0.10.27](https://github.com/openclaw-rocks/k8s-operator/compare/v0.10.26...v0.10.27) (2026-03-09)
+
+
+### Features
+
+* support persistent Chromium browser profiles via PVC ([#271](https://github.com/openclaw-rocks/k8s-operator/issues/271)) ([9d80414](https://github.com/openclaw-rocks/k8s-operator/commit/9d804148da28ad4ab1640d1da15d7b100ade4347)), closes [#267](https://github.com/openclaw-rocks/k8s-operator/issues/267)
+
+## [0.10.26](https://github.com/openclaw-rocks/k8s-operator/compare/v0.10.25...v0.10.26) (2026-03-09)
+
+
+### Features
+
+* persist Tailscale state across pod restarts via TS_KUBE_SECRET ([#265](https://github.com/openclaw-rocks/k8s-operator/issues/265)) ([0a9601d](https://github.com/openclaw-rocks/k8s-operator/commit/0a9601d06972f6d507705c350987d1c12d6c5759)), closes [#262](https://github.com/openclaw-rocks/k8s-operator/issues/262)
+
+
+### Bug Fixes
+
+* remove invalid llmConfig from webhook validation and docs ([#261](https://github.com/openclaw-rocks/k8s-operator/issues/261)) ([e8f7399](https://github.com/openclaw-rocks/k8s-operator/commit/e8f739940e92d2a0a5b2b27ee7cadcab07df6026))
+* respect pod-level runAsNonRoot in container security contexts ([#266](https://github.com/openclaw-rocks/k8s-operator/issues/266)) ([ad21b4c](https://github.com/openclaw-rocks/k8s-operator/commit/ad21b4c59260117ed9d2f13ba8278fb4fe7e56d1)), closes [#263](https://github.com/openclaw-rocks/k8s-operator/issues/263)
+
 ## [0.10.25](https://github.com/openclaw-rocks/k8s-operator/compare/v0.10.24...v0.10.25) (2026-03-07)
 
 
