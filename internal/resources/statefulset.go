@@ -76,7 +76,7 @@ func BuildStatefulSet(instance *openclawv1alpha1.OpenClawInstance, gatewayTokenS
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            ServiceAccountName(instance),
 					DeprecatedServiceAccount:      ServiceAccountName(instance),
-					AutomountServiceAccountToken:  Ptr(instance.Spec.SelfConfigure.Enabled),
+					AutomountServiceAccountToken:  Ptr(instance.Spec.SelfConfigure.Enabled || instance.Spec.Tailscale.Enabled),
 					SecurityContext:               buildPodSecurityContext(instance),
 					InitContainers:                buildInitContainers(instance, skillPacks),
 					Containers:                    buildContainers(instance, gwSecretName),
@@ -145,12 +145,23 @@ func buildPodSecurityContext(instance *openclawv1alpha1.OpenClawInstance) *corev
 	return psc
 }
 
+// podRunAsNonRoot returns the effective RunAsNonRoot value from the pod security context.
+// Returns true if not explicitly configured (secure default).
+func podRunAsNonRoot(instance *openclawv1alpha1.OpenClawInstance) bool {
+	if spec := instance.Spec.Security.PodSecurityContext; spec != nil && spec.RunAsNonRoot != nil {
+		return *spec.RunAsNonRoot
+	}
+	return true
+}
+
 // buildContainerSecurityContext creates the container-level security context
 func buildContainerSecurityContext(instance *openclawv1alpha1.OpenClawInstance) *corev1.SecurityContext {
+	nonRoot := podRunAsNonRoot(instance)
+
 	sc := &corev1.SecurityContext{
 		AllowPrivilegeEscalation: Ptr(false),
 		ReadOnlyRootFilesystem:   Ptr(true), // PVC subpaths at ~/.openclaw/, ~/.local/, ~/.cache/ + /tmp emptyDir provide writable paths
-		RunAsNonRoot:             Ptr(true),
+		RunAsNonRoot:             Ptr(nonRoot),
 		Capabilities: &corev1.Capabilities{
 			Drop: []corev1.Capability{"ALL"},
 		},
@@ -158,6 +169,9 @@ func buildContainerSecurityContext(instance *openclawv1alpha1.OpenClawInstance) 
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},
 	}
+
+	psc := buildPodSecurityContext(instance)
+	sc = mergeSecurityContext(sc, psc)
 
 	// Apply user overrides
 	spec := instance.Spec.Security.ContainerSecurityContext
@@ -171,6 +185,57 @@ func buildContainerSecurityContext(instance *openclawv1alpha1.OpenClawInstance) 
 		if spec.Capabilities != nil {
 			sc.Capabilities = spec.Capabilities
 		}
+		if spec.RunAsNonRoot != nil {
+			sc.RunAsNonRoot = spec.RunAsNonRoot
+		}
+		if spec.RunAsUser != nil {
+			sc.RunAsUser = spec.RunAsUser
+		}
+	}
+
+	return sc
+}
+
+func mergeSecurityContext(sc *corev1.SecurityContext, psc *corev1.PodSecurityContext) *corev1.SecurityContext {
+	if psc == nil {
+		return sc
+	}
+	if sc == nil {
+		sc = &corev1.SecurityContext{}
+	}
+
+	if psc.RunAsNonRoot != nil {
+		sc.RunAsNonRoot = psc.RunAsNonRoot
+	}
+	if psc.RunAsUser != nil {
+		sc.RunAsUser = psc.RunAsUser
+	}
+	if psc.RunAsGroup != nil {
+		sc.RunAsGroup = psc.RunAsGroup
+	}
+
+	return sc
+}
+
+func mergeContainerSecurityContext(sc *corev1.SecurityContext, csc *openclawv1alpha1.ContainerSecurityContextSpec) *corev1.SecurityContext {
+	if csc == nil {
+		return sc
+	}
+	if sc == nil {
+		sc = &corev1.SecurityContext{}
+	}
+	if csc.AllowPrivilegeEscalation != nil {
+		sc.AllowPrivilegeEscalation = csc.AllowPrivilegeEscalation
+	}
+
+	if csc.ReadOnlyRootFilesystem != nil {
+		sc.ReadOnlyRootFilesystem = csc.ReadOnlyRootFilesystem
+	}
+	if csc.RunAsNonRoot != nil {
+		sc.RunAsNonRoot = csc.RunAsNonRoot
+	}
+	if csc.RunAsUser != nil {
+		sc.RunAsUser = csc.RunAsUser
 	}
 
 	return sc
@@ -490,6 +555,8 @@ func buildInitContainers(instance *openclawv1alpha1.OpenClawInstance, skillPacks
 			initPullPolicy = getPullPolicy(instance)
 		}
 
+		psc := buildPodSecurityContext(instance)
+
 		initContainers = append(initContainers, corev1.Container{
 			Name:                     "init-config",
 			Image:                    initImage,
@@ -498,17 +565,17 @@ func buildInitContainers(instance *openclawv1alpha1.OpenClawInstance, skillPacks
 			Env:                      initEnv,
 			TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 			TerminationMessagePolicy: corev1.TerminationMessageReadFile,
-			SecurityContext: &corev1.SecurityContext{
+			SecurityContext: mergeSecurityContext(&corev1.SecurityContext{
 				AllowPrivilegeEscalation: Ptr(false),
 				ReadOnlyRootFilesystem:   Ptr(readOnlyRoot),
-				RunAsNonRoot:             Ptr(true),
+				RunAsNonRoot:             Ptr(podRunAsNonRoot(instance)),
 				Capabilities: &corev1.Capabilities{
 					Drop: []corev1.Capability{"ALL"},
 				},
 				SeccompProfile: &corev1.SeccompProfile{
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},
-			},
+			}, psc),
 			VolumeMounts: mounts,
 		})
 	}
@@ -663,14 +730,40 @@ func BuildInitScript(instance *openclawv1alpha1.OpenClawInstance, skillPacks *Re
 	return strings.Join(lines, "\n")
 }
 
+// skillInstallWrapper is a shell function that wraps `clawhub install` to
+// tolerate "Already installed" errors, making the init container idempotent
+// when persistent storage is enabled (#258).
+const skillInstallWrapper = `_install_skill() {
+  local output
+  if output=$(npx -y clawhub install "$1" 2>&1); then
+    echo "$output"
+  elif echo "$output" | grep -q 'Already installed'; then
+    echo "Skill $1 already installed, skipping"
+  else
+    echo "$output" >&2
+    return 1
+  fi
+}`
+
 // parseSkillEntry returns the shell command to install a single skill entry.
 // Entries prefixed with "npm:" are installed via `npm install` into the PVC
-// node_modules. All other entries use `npx -y clawhub install`.
+// node_modules. All other entries use the _install_skill wrapper around
+// `npx -y clawhub install`.
 func parseSkillEntry(entry string) string {
 	if pkg, ok := strings.CutPrefix(entry, "npm:"); ok {
 		return fmt.Sprintf("cd /home/openclaw/.openclaw && npm install %s", shellQuote(pkg))
 	}
-	return fmt.Sprintf("npx -y clawhub install %s", shellQuote(entry))
+	return fmt.Sprintf("_install_skill %s", shellQuote(entry))
+}
+
+// hasClawHubSkills returns true if any entry is a ClawHub skill (not npm-prefixed).
+func hasClawHubSkills(skills []string) bool {
+	for _, s := range skills {
+		if !strings.HasPrefix(s, "npm:") {
+			return true
+		}
+	}
+	return false
 }
 
 // BuildSkillsScript generates the shell script for the skills init container.
@@ -688,6 +781,10 @@ func BuildSkillsScript(instance *openclawv1alpha1.OpenClawInstance) string {
 	sort.Strings(skills)
 
 	var lines []string
+	lines = append(lines, "set -e")
+	if hasClawHubSkills(skills) {
+		lines = append(lines, skillInstallWrapper)
+	}
 	for _, skill := range skills {
 		lines = append(lines, parseSkillEntry(skill))
 	}
@@ -747,7 +844,7 @@ func buildSkillsInitContainer(instance *openclawv1alpha1.OpenClawInstance) *core
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: Ptr(false),
 			ReadOnlyRootFilesystem:   Ptr(false), // npx needs to write to node_modules
-			RunAsNonRoot:             Ptr(true),
+			RunAsNonRoot:             Ptr(podRunAsNonRoot(instance)),
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
 			},
@@ -805,7 +902,7 @@ pnpm --version`
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: Ptr(false),
 			ReadOnlyRootFilesystem:   Ptr(false), // corepack writes to node internals
-			RunAsNonRoot:             Ptr(true),
+			RunAsNonRoot:             Ptr(podRunAsNonRoot(instance)),
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
 			},
@@ -943,7 +1040,7 @@ uv --version`
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: Ptr(false),
 			ReadOnlyRootFilesystem:   Ptr(false), // uv needs writable paths
-			RunAsNonRoot:             Ptr(true),
+			RunAsNonRoot:             Ptr(podRunAsNonRoot(instance)),
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
 			},
@@ -987,14 +1084,11 @@ func buildTailscaleContainer(instance *openclawv1alpha1.OpenClawInstance) corev1
 		{Name: "TS_SOCKET", Value: TailscaleSocketPath},
 		{Name: "TS_SERVE_CONFIG", Value: "/etc/tailscale/serve/" + TailscaleServeConfigKey},
 		{Name: "TS_HOSTNAME", Value: hostname},
-		// Disable Kubernetes Secret-based state storage so containerboot
-		// does not try to create a kube client (which requires a service
-		// account token the pod intentionally does not mount).
-		{Name: "TS_KUBE_SECRET", Value: ""},
-		// Override the auto-injected KUBERNETES_SERVICE_HOST so containerboot
-		// does not attempt kube client init (tailscale/tailscale#8188).
-		// State is persisted to TS_STATE_DIR on the emptyDir volume instead.
-		{Name: "KUBERNETES_SERVICE_HOST", Value: ""},
+		// Persist Tailscale node identity and TLS certificates to a
+		// Kubernetes Secret so state survives pod restarts. This prevents
+		// hostname incrementing (device-1, device-2, ...) and Let's Encrypt
+		// certificate re-issuance on every restart.
+		{Name: "TS_KUBE_SECRET", Value: TailscaleStateSecretName(instance)},
 	}
 
 	// Inject TS_AUTHKEY from Secret
@@ -1012,6 +1106,25 @@ func buildTailscaleContainer(instance *openclawv1alpha1.OpenClawInstance) corev1
 				},
 			},
 		})
+	}
+
+	psc := buildPodSecurityContext(instance)
+
+	sc := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: Ptr(false),
+		ReadOnlyRootFilesystem:   Ptr(true),
+		RunAsNonRoot:             Ptr(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+
+	sc = mergeSecurityContext(sc, psc)
+	if instance.Spec.Security.ContainerSecurityContext != nil {
+		sc = mergeContainerSecurityContext(sc, instance.Spec.Security.ContainerSecurityContext)
 	}
 
 	return corev1.Container{
@@ -1036,18 +1149,8 @@ func buildTailscaleContainer(instance *openclawv1alpha1.OpenClawInstance) corev1
 				MountPath: "/tmp",
 			},
 		},
-		Resources: buildTailscaleResourceRequirements(instance),
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: Ptr(false),
-			ReadOnlyRootFilesystem:   Ptr(true),
-			RunAsNonRoot:             Ptr(true),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		},
+		Resources:                buildTailscaleResourceRequirements(instance),
+		SecurityContext:          sc,
 		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
 	}
@@ -1108,7 +1211,7 @@ func buildTailscaleBinInitContainer(instance *openclawv1alpha1.OpenClawInstance)
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: Ptr(false),
 			ReadOnlyRootFilesystem:   Ptr(true),
-			RunAsNonRoot:             Ptr(true),
+			RunAsNonRoot:             Ptr(podRunAsNonRoot(instance)),
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
 			},
@@ -1123,8 +1226,25 @@ func buildTailscaleBinInitContainer(instance *openclawv1alpha1.OpenClawInstance)
 
 // buildGatewayProxyContainer creates the nginx reverse proxy sidecar that
 // exposes the loopback-bound gateway and canvas ports for external access.
-func buildGatewayProxyContainer(_ *openclawv1alpha1.OpenClawInstance) corev1.Container {
-	return corev1.Container{
+func buildGatewayProxyContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.Container {
+	psc := buildPodSecurityContext(instance)
+	sc := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: Ptr(false),
+		ReadOnlyRootFilesystem:   Ptr(true),
+		RunAsNonRoot:             Ptr(true),
+		RunAsUser:                Ptr(int64(101)), // nginx user in alpine
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+	sc = mergeSecurityContext(sc, psc)
+	if instance.Spec.Security.ContainerSecurityContext != nil {
+		sc = mergeContainerSecurityContext(sc, instance.Spec.Security.ContainerSecurityContext)
+	}
+	container := corev1.Container{
 		Name:            "gateway-proxy",
 		Image:           DefaultGatewayProxyImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
@@ -1162,21 +1282,11 @@ func buildGatewayProxyContainer(_ *openclawv1alpha1.OpenClawInstance) corev1.Con
 				corev1.ResourceMemory: resource.MustParse("64Mi"),
 			},
 		},
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: Ptr(false),
-			ReadOnlyRootFilesystem:   Ptr(true),
-			RunAsNonRoot:             Ptr(true),
-			RunAsUser:                Ptr(int64(101)), // nginx user in alpine
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		},
+		SecurityContext:          sc,
 		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
 	}
+	return container
 }
 
 // buildChromiumContainer creates the Chromium sidecar container
@@ -1204,6 +1314,10 @@ func buildChromiumContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.
 		{
 			Name:      "chromium-shm",
 			MountPath: "/dev/shm",
+		},
+		{
+			Name:      "chromium-data",
+			MountPath: "/chromium-data",
 		},
 	}
 
@@ -1243,6 +1357,12 @@ func buildChromiumContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.
 		"--disable-features=AutomationControlled",
 		"--no-first-run",
 	}
+	// When persistence is enabled, direct Chromium to store its profile data
+	// on the persistent volume so cookies, localStorage, and session tokens
+	// survive pod restarts.
+	if instance.Spec.Chromium.Persistence.Enabled {
+		allArgs = append(allArgs, "--user-data-dir=/chromium-data")
+	}
 	allArgs = append(allArgs, instance.Spec.Chromium.ExtraArgs...)
 	if launchArgs, err := json.Marshal(allArgs); err == nil {
 		chromiumEnv = append(chromiumEnv, corev1.EnvVar{
@@ -1254,24 +1374,31 @@ func buildChromiumContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.
 	// Append user-supplied extra env vars
 	chromiumEnv = append(chromiumEnv, instance.Spec.Chromium.ExtraEnv...)
 
+	psc := buildPodSecurityContext(instance)
+
+	sc := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: Ptr(false),
+		ReadOnlyRootFilesystem:   Ptr(true),
+		RunAsNonRoot:             Ptr(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+
+	sc = mergeSecurityContext(sc, psc)
+	if instance.Spec.Security.ContainerSecurityContext != nil {
+		sc = mergeContainerSecurityContext(sc, instance.Spec.Security.ContainerSecurityContext)
+	}
 	return corev1.Container{
 		Name:                     "chromium",
 		Image:                    image,
 		ImagePullPolicy:          corev1.PullIfNotPresent,
 		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: Ptr(false),
-			ReadOnlyRootFilesystem:   Ptr(false), // Chromium needs writable dirs for profiles, cache, crash dumps
-			RunAsNonRoot:             Ptr(true),
-			RunAsUser:                Ptr(int64(999)), // browserless built-in user (blessuser)
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		},
+		SecurityContext:          sc,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "cdp",
@@ -1297,7 +1424,7 @@ func buildChromiumContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.
 			PeriodSeconds:       2,
 			FailureThreshold:    15,
 			SuccessThreshold:    1,
-			TimeoutSeconds:      2,
+			TimeoutSeconds:      5,
 		},
 	}
 }
@@ -1319,24 +1446,31 @@ func buildOllamaContainer(instance *openclawv1alpha1.OpenClawInstance) corev1.Co
 		image = repo + "@" + instance.Spec.Ollama.Image.Digest
 	}
 
+	psc := buildPodSecurityContext(instance)
+
+	sc := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: Ptr(false),
+		ReadOnlyRootFilesystem:   Ptr(true),
+		RunAsNonRoot:             Ptr(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+
+	sc = mergeSecurityContext(sc, psc)
+	if instance.Spec.Security.ContainerSecurityContext != nil {
+		sc = mergeContainerSecurityContext(sc, instance.Spec.Security.ContainerSecurityContext)
+	}
 	container := corev1.Container{
 		Name:                     "ollama",
 		Image:                    image,
 		ImagePullPolicy:          corev1.PullIfNotPresent,
 		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: Ptr(false),
-			ReadOnlyRootFilesystem:   Ptr(false), // Ollama needs writable dirs
-			RunAsNonRoot:             Ptr(false), // Ollama requires root
-			RunAsUser:                Ptr(int64(0)),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		},
+		SecurityContext:          sc,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "ollama",
@@ -1429,6 +1563,24 @@ func buildWebTerminalContainer(instance *openclawv1alpha1.OpenClawInstance) core
 		)
 	}
 
+	psc := buildPodSecurityContext(instance)
+
+	sc := &corev1.SecurityContext{
+		AllowPrivilegeEscalation: Ptr(false),
+		ReadOnlyRootFilesystem:   Ptr(true),
+		RunAsNonRoot:             Ptr(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+
+	sc = mergeSecurityContext(sc, psc)
+	if instance.Spec.Security.ContainerSecurityContext != nil {
+		sc = mergeContainerSecurityContext(sc, instance.Spec.Security.ContainerSecurityContext)
+	}
 	return corev1.Container{
 		Name:                     "web-terminal",
 		Image:                    image,
@@ -1436,18 +1588,7 @@ func buildWebTerminalContainer(instance *openclawv1alpha1.OpenClawInstance) core
 		ImagePullPolicy:          corev1.PullIfNotPresent,
 		TerminationMessagePath:   corev1.TerminationMessagePathDefault,
 		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: Ptr(false),
-			ReadOnlyRootFilesystem:   Ptr(false), // ttyd needs writable rootfs
-			RunAsNonRoot:             Ptr(true),
-			RunAsUser:                Ptr(int64(1000)), // same as main container
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		},
+		SecurityContext:          sc,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "web-terminal",
@@ -1748,6 +1889,29 @@ func buildVolumes(instance *openclawv1alpha1.OpenClawInstance, skillPacks *Resol
 				},
 			},
 		)
+
+		// Chromium browser profile data volume - persistent PVC or ephemeral emptyDir
+		if instance.Spec.Chromium.Persistence.Enabled {
+			claimName := ChromiumPVCName(instance)
+			if instance.Spec.Chromium.Persistence.ExistingClaim != "" {
+				claimName = instance.Spec.Chromium.Persistence.ExistingClaim
+			}
+			volumes = append(volumes, corev1.Volume{
+				Name: "chromium-data",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: claimName,
+					},
+				},
+			})
+		} else {
+			volumes = append(volumes, corev1.Volume{
+				Name: "chromium-data",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				},
+			})
+		}
 	}
 
 	// Ollama model cache volume
