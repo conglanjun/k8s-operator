@@ -123,7 +123,11 @@ func buildPodSecurityContext(instance *openclawv1alpha1.OpenClawInstance) *corev
 		if spec.RunAsGroup != nil {
 			psc.RunAsGroup = spec.RunAsGroup
 		} else {
-			psc.RunAsGroup = Ptr(int64(1000))
+			if spec.RunAsUser == Ptr(int64(0)) {
+				psc.RunAsGroup = Ptr(int64(0))
+			} else {
+				psc.RunAsGroup = Ptr(int64(1000))
+			}
 		}
 		if spec.FSGroup != nil {
 			psc.FSGroup = spec.FSGroup
@@ -212,6 +216,12 @@ func mergeSecurityContext(sc *corev1.SecurityContext, psc *corev1.PodSecurityCon
 	}
 	if psc.RunAsGroup != nil {
 		sc.RunAsGroup = psc.RunAsGroup
+	} else {
+		if psc.RunAsUser == Ptr(int64(0)) {
+			sc.RunAsGroup = Ptr(int64(0))
+		} else {
+			sc.RunAsGroup = Ptr(int64(1000))
+		}
 	}
 
 	return sc
