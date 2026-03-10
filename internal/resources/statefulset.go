@@ -461,11 +461,12 @@ func buildMainEnv(instance *openclawv1alpha1.OpenClawInstance, gatewayTokenSecre
 		// (IPv6 addresses need brackets in URLs but Kubernetes env var
 		// interpolation cannot add them conditionally) and is stable
 		// across pod restarts (unlike status.podIP).
-		svcDNS := fmt.Sprintf("%s.%s.svc", ServiceName(instance), instance.Namespace)
+		// svcDNS := fmt.Sprintf("%s.%s.svc", ServiceName(instance), instance.Namespace)
 		env = append(env,
 			corev1.EnvVar{
-				Name:  "OPENCLAW_CHROMIUM_CDP",
-				Value: fmt.Sprintf("http://%s:%d", svcDNS, ChromiumPort),
+				Name: "OPENCLAW_CHROMIUM_CDP",
+				// Value: fmt.Sprintf("http://%s:%d", svcDNS, ChromiumPort),
+				Value: fmt.Sprintf("http://127.0.0.1:%d", ChromiumPort),
 			},
 		)
 	}
