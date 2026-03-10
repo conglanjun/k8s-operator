@@ -9,6 +9,8 @@ ARG PREBUILT_BINARY
 
 WORKDIR /workspace
 
+ENV GOPROXY=https://goproxy.cn,direct
+
 # Copy dependency files first for caching
 COPY go.mod go.sum ./
 RUN if [ -z "$PREBUILT_BINARY" ]; then go mod download; fi
